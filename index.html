@@ -3,155 +3,203 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PTD-00 Final Viewer</title>
+    <title>PTD-00 System - AutoDetect</title>
 
-    <!-- 1. Mobile Engine -->
+    <!-- 1. Silnik Mobile (Google) -->
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
 
-    <!-- 2. Quest Engine -->
+    <!-- 2. Silnik VR/MR (A-Frame) -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <style>
-        /* FIX: Wymuszenie pełnego ekranu dla wszystkich kontenerów */
-        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #f0f0f0; }
-        
-        #mobile-view { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 10; display: block; }
-        #quest-view { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 20; display: none; }
+        /* RESET I FULLSCREEN */
+        html, body { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            background-color: #202020; /* Ciemne tło dla desktopu/loadingu */
+            overflow: hidden; 
+        }
 
-        /* Stylizacja Model-Viewer na pełny ekran */
-        model-viewer { width: 100%; height: 100%; --poster-color: transparent; }
+        /* KONTENERY */
+        #mobile-container {
+            width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 10;
+            display: none; /* Domyślnie ukryte, skrypt włączy odpowiedni */
+            background-color: #f5f5f5;
+        }
 
-        /* Przyciski */
-        .controls { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; pointer-events: none; }
-        .btn { pointer-events: auto; padding: 12px 25px; border-radius: 50px; border: none; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 16px; font-family: sans-serif; }
-        .btn-quest { background: #8e44ad; color: white; display: flex; align-items: center; gap: 8px; }
-        .btn-exit { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.6); color: white; z-index: 1001; display: none; }
+        #quest-container {
+            width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 20;
+            display: none; /* Domyślnie ukryte */
+            background: transparent; /* Kluczowe dla Queata w trybie 2D */
+        }
 
-        /* Ukryj Quest na małych ekranach */
-        @media (max-width: 600px) { .btn-quest { display: none; } }
+        /* STYLIZACJA MODEL-VIEWER (MOBILE) */
+        model-viewer { 
+            width: 100%; height: 100%; 
+            --poster-color: transparent;
+        }
+
+        /* PRZYCISK STARTOWY QUEST */
+        .quest-start-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.8); color: white;
+        }
+
+        .btn-quest-start {
+            padding: 20px 40px; font-size: 24px; border-radius: 50px;
+            background: #8e44ad; color: white; border: 2px solid white;
+            cursor: pointer; font-weight: bold; margin-top: 20px;
+            box-shadow: 0 0 20px rgba(142, 68, 173, 0.5);
+        }
+
+        .info-text { font-family: monospace; font-size: 1.2em; text-align: center; max-width: 80%; }
     </style>
 
-    <!-- LOGIKA QUEST: Remote Grab (Chwyć gdziekolwiek, by ruszyć model) -->
+    <!-- LOGIKA DETEKCJI I CHWYTANIA -->
     <script>
-        AFRAME.registerComponent('remote-grab', {
+        // 1. SKRYPT CHWYTANIA (Quest 3)
+        AFRAME.registerComponent('raycast-grab', {
             init: function () {
                 this.grabbedEl = null;
-                // Nasłuchuj przycisku GRIP (boczny)
+                this.raycaster = this.el.components.raycaster;
+
+                // Nasłuch przycisku GRIP (boczny pod palcem środkowym)
                 this.el.addEventListener('gripdown', this.onGrab.bind(this));
                 this.el.addEventListener('gripup', this.onRelease.bind(this));
             },
             onGrab: function () {
-                // Znajdź model w scenie
-                const model = document.querySelector('#target-model');
-                if (model && !this.grabbedEl) {
-                    this.grabbedEl = model;
-                    // "Przyklej" model do kontrolera (zachowując pozycję w świecie, żeby nie skakał)
-                    this.grabbedEl.object3D.attach(this.el.object3D);
+                // Sprawdź czy promień w coś celuje
+                const intersections = this.el.components.raycaster.intersectedEls;
+                if (intersections.length > 0) {
+                    // Weź pierwszy trafiony obiekt
+                    const hitEl = intersections[0];
+                    
+                    // Sprawdź czy to nasz silos (zabezpieczenie)
+                    if (hitEl.classList.contains('clickable')) {
+                        this.grabbedEl = hitEl;
+                        // PARENTING: Przepnij silos do kontrolera
+                        this.grabbedEl.object3D.attach(this.el.object3D);
+                    }
                 }
             },
             onRelease: function () {
                 if (this.grabbedEl) {
-                    // "Odczep" model - przywróć go do sceny
+                    // ODPINANIE: Przepnij z powrotem do sceny
                     this.el.sceneEl.object3D.attach(this.grabbedEl.object3D);
                     this.grabbedEl = null;
                 }
             }
         });
 
-        function enterVRMode() {
-            document.getElementById('mobile-view').style.display = 'none';
-            document.getElementById('quest-view').style.display = 'block';
-            document.querySelector('.btn-exit').style.display = 'block';
-            
-            const scene = document.querySelector('a-scene');
-            if(scene.enterVR) scene.enterVR();
-        }
+        // 2. DETEKCJA URZĄDZENIA (Uruchamia się po załadowaniu strony)
+        window.addEventListener('load', () => {
+            const userAgent = navigator.userAgent;
+            const isQuest = userAgent.includes('Oculus') || userAgent.includes('Quest');
 
-        function exitVRMode() {
+            if (isQuest) {
+                // Tryb Quest: Pokaż kontener VR, ukryj Mobile
+                document.getElementById('quest-container').style.display = 'block';
+                console.log("Wykryto Meta Quest 3");
+            } else {
+                // Tryb Mobile/Desktop: Pokaż kontener Mobile
+                document.getElementById('mobile-container').style.display = 'block';
+                console.log("Wykryto Mobile/Desktop");
+            }
+        });
+
+        // Funkcja wejścia w VR (Quest)
+        function enterMixedReality() {
             const scene = document.querySelector('a-scene');
-            if(scene.exitVR) scene.exitVR();
-            
-            document.getElementById('mobile-view').style.display = 'block';
-            document.getElementById('quest-view').style.display = 'none';
-            document.querySelector('.btn-exit').style.display = 'none';
+            scene.enterVR(); // To uruchamia tryb immersyjny
         }
     </script>
 </head>
 <body>
 
-    <!-- === SEKCJA 1: TELEFON (Android/iOS) === -->
-    <div id="mobile-view">
+    <!-- === WIDOK 1: MOBILE (iOS / Android) === -->
+    <!-- Wyświetla się TYLKO na telefonach. Quest tego nie widzi. -->
+    <div id="mobile-container">
         <model-viewer 
             src="PTD-00.glb" 
             ios-src="PTD-00.usdz" 
             ar 
-            ar-modes="webxr scene-viewer quick-look" 
+            ar-modes="scene-viewer quick-look" 
             camera-controls 
             auto-rotate
             shadow-intensity="1">
             
-            <button slot="ar-button" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: #007bff; color: white; border-radius: 30px; border: none; font-weight: bold;">
-                📦 AR (Telefon)
+            <button slot="ar-button" style="position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: #007bff; color: white; border-radius: 30px; border: none; font-weight: bold; font-size: 16px;">
+                📦 Zobacz w AR
             </button>
         </model-viewer>
-
-        <!-- Przycisk widoczny tylko na dużych ekranach/Quest -->
-        <div class="controls">
-            <button class="btn btn-quest" onclick="enterVRMode()">
-                <span>🥽</span> Tryb Quest 3 (Mixed Reality)
-            </button>
-        </div>
     </div>
 
-    <!-- === SEKCJA 2: QUEST 3 (Mixed Reality) === -->
-    <div id="quest-view">
-        <button class="btn btn-exit" onclick="exitVRMode()">❌ Zamknij</button>
+    <!-- === WIDOK 2: QUEST 3 (Mixed Reality) === -->
+    <!-- Wyświetla się TYLKO na goglach. Telefon tego nie widzi. -->
+    <div id="quest-container">
+        
+        <!-- Ekran powitalny w przeglądarce gogli (2D) -->
+        <div class="quest-start-overlay">
+            <div class="info-text">Tryb Inżynierski: Meta Quest 3</div>
+            <button class="btn-quest-start" onclick="enterMixedReality()">
+                Wejdź w Mixed Reality
+            </button>
+            <p style="margin-top:10px; opacity: 0.7;">Po wejściu: Użyj bocznego przycisku (Grip), aby chwycić i przesunąć model.</p>
+        </div>
 
-        <!-- Scena A-Frame:
-             background="color: transparent" -> KLUCZOWE dla Passthrough
-             renderer="alpha: true" -> Włącza przezroczystość canvasa
-        -->
+        <!-- SCENA VR/AR -->
+        <!-- background="color: transparent" -> TO USUWA BIAŁE TŁO -->
         <a-scene 
             embedded
-            webxr="optionalFeatures: hit-test, local-floor; overlayElement: #quest-view"
-            renderer="alpha: true; colorManagement: true;"
+            renderer="alpha: true; colorManagement: true; exposure: 1;"
+            webxr="optionalFeatures: hit-test, local-floor; overlayElement: #quest-container"
             background="color: transparent">
 
             <a-assets>
-                <a-asset-item id="silos-asset" src="PTD-00.glb"></a-asset-item>
+                <a-asset-item id="silos-glb" src="PTD-00.glb"></a-asset-item>
             </a-assets>
 
-            <!-- ŚWIATŁO (Mocne, inżynierskie, żeby widzieć detale) -->
-            <a-entity light="type: ambient; intensity: 0.8;"></a-entity>
-            <a-entity light="type: directional; intensity: 1; castShadow: true;" position="-2 4 4"></a-entity>
+            <!-- OŚWIETLENIE SCENY (Dla kontrastu) -->
+            <a-entity light="type: ambient; intensity: 1.0;"></a-entity>
+            <a-entity light="type: directional; intensity: 1.5; castShadow: true;" position="-1 2 1"></a-entity>
 
-            <!-- MODEL -->
-            <!-- scale="1 1 1" - Skala rzeczywista -->
+            <!-- MODEL GLÓWNY -->
+            <!-- class="clickable" -> Oznacza, że laser go widzi -->
+            <!-- position="0 1 -1" -> 1 metr nad ziemią, 1 metr przed Tobą -->
+            <!-- scale="0.5 0.5 0.5" -> Na start 50% skali (łatwiej ogarnąć w pokoju) -->
             <a-entity 
-                id="target-model"
-                gltf-model="#silos-asset" 
-                position="0 1 -1.5" 
-                rotation="0 0 0"
+                id="main-model"
+                class="clickable"
+                gltf-model="#silos-glb" 
+                position="0 1 -1" 
+                scale="0.5 0.5 0.5"
                 shadow="receive: true">
             </a-entity>
 
             <!-- RIG (GRACZ) -->
-            <!-- Position 0 0 0 jest kluczowe! Nie dodajemy sztucznej wysokości -->
+            <!-- Pozycja 0 0 0 -> Resetuje pozycję do Twoich stóp w pokoju -->
             <a-entity id="rig" position="0 0 0">
-                <a-entity camera position="0 0 0" look-controls="pointerLockEnabled: false"></a-entity>
+                <!-- Kamera -->
+                <a-camera position="0 0 0" look-controls="pointerLockEnabled: false"></a-camera>
                 
-                <!-- Prawa ręka - Sterowanie -->
+                <!-- KONTROLERY (Prawy i Lewy) -->
+                <!-- raycaster: far: 5 -> Laser sięga na 5 metrów -->
+                <!-- line: color: red -> Żebyś widział gdzie celujesz -->
+                
                 <a-entity 
+                    id="rightHand"
                     oculus-touch-controls="hand: right"
-                    remote-grab
-                    model="true">
+                    laser-controls="hand: right"
+                    raycaster="objects: .clickable; far: 5; showLine: true; lineColor: red; lineOpacity: 0.7"
+                    raycast-grab>
                 </a-entity>
 
-                <!-- Lewa ręka - Sterowanie (Opcjonalnie obie ręce mogą łapać) -->
                 <a-entity 
+                    id="leftHand"
                     oculus-touch-controls="hand: left"
-                    remote-grab
-                    model="true">
+                    laser-controls="hand: left"
+                    raycaster="objects: .clickable; far: 5; showLine: true; lineColor: red; lineOpacity: 0.7"
+                    raycast-grab>
                 </a-entity>
             </a-entity>
 
