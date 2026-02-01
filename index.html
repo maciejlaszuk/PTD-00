@@ -1,54 +1,176 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>PTD-00 VR/AR Inspection</title>
-    <!-- Biblioteka A-Frame (Core WebXR) -->
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PTD-00 Universal Viewer (Mobile + VR)</title>
+    
+    <!-- 1. Biblioteka Model-Viewer (Dla Android/iOS/Desktop) -->
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+
+    <!-- 2. Biblioteka A-Frame (Tylko dla trybu Quest VR) -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <!-- Dodatki do obsługi otoczenia i kontrolerów -->
-    <script src="https://unpkg.com/aframe-environment-component@1.3.3/dist/aframe-environment-component.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.2.0/dist/aframe-extras.min.js"></script>
-  </head>
-  <body>
-    <!-- Scena z włączonym WebXR. 
-         renderer="colorManagement: true;" zapewnia poprawne kolory materiałów z Inventora. 
-    -->
-    <a-scene xr-mode-ui="enabled: true" renderer="colorManagement: true;">
-      
-      <!-- ASSETS: Tutaj ładujemy model -->
-      <a-assets>
-        <a-asset-item id="model-ptd" src="PTD-00.glb"></a-asset-item>
-      </a-assets>
-
-      <!-- MODEL 3D -->
-      <!-- position: 0 0 -3 -> model stoi 3 metry przed Tobą -->
-      <!-- scale: 1 1 1 -> Skala 1:1. Jeśli model jest za duży, zmień np. na 0.1 0.1 0.1 -->
-      <a-entity 
-        gltf-model="#model-ptd" 
-        position="0 0 -2" 
-        rotation="0 0 0"
-        shadow="receive: true">
-      </a-entity>
-
-      <!-- OŚWIETLENIE -->
-      <!-- Światło kierunkowe (Słońce) + Ambient (rozproszone) -->
-      <a-entity light="type: ambient; intensity: 0.5;"></a-entity>
-      <a-entity light="type: directional; castShadow: true; intensity: 1;" position="-1 2 1"></a-entity>
-
-      <!-- GRACZ / KAMERA (RIG) -->
-      <!-- movement-controls pozwala chodzić używając gałek na kontrolerach Quest -->
-      <a-entity id="rig" movement-controls="fly: true; speed: 0.5" position="0 1.6 2">
-        <a-entity camera position="0 0 0" look-controls></a-entity>
+    
+    <style>
+        body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: #f0f0f0; font-family: sans-serif; }
         
-        <!-- Kontrolery (wizualizacja rąk + obsługa inputu) -->
-        <a-entity oculus-touch-controls="hand: left" laser-controls="hand: left" raycaster="objects: .clickable; far: 10"></a-entity>
-        <a-entity oculus-touch-controls="hand: right" laser-controls="hand: right" raycaster="objects: .clickable; far: 10"></a-entity>
-      </a-entity>
+        /* Kontener dla Model-Viewer (Domyślny) */
+        #mobile-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 10; }
+        
+        /* Kontener dla VR (Ukryty domyślnie) */
+        #vr-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 20; display: none; }
+        
+        /* Przyciski */
+        .custom-btn {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 15px; z-index: 100; pointer-events: auto;
+        }
 
-      <!-- TŁO (opcjonalnie wyłącz dla Passthrough AR) -->
-      <!-- W trybie VR daje ładny grid inżynierski. W AR Quest nadpisze to obrazem z kamer -->
-      <a-entity environment="preset: grid; gridColor: orange; skyType: atmosphere; lighting: none; ground: flat;"></a-entity>
+        .btn {
+            padding: 12px 24px; border-radius: 30px; border: none; font-weight: bold;
+            cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            font-size: 16px; display: flex; align-items: center; gap: 8px;
+        }
 
-    </a-scene>
-  </body>
+        .btn-ar { background: #007bff; color: white; } /* Niebieski dla Mobile AR */
+        .btn-vr { background: #8e44ad; color: white; } /* Fioletowy dla Quest VR */
+        .btn-close-vr { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.5); color: white; z-index: 1000; display: none; }
+
+        /* Ukryj przycisk VR na małych telefonach (opcjonalne, ale czystsze) */
+        @media (max-width: 600px) {
+            .btn-vr { display: none; } 
+        }
+    </style>
+
+    <!-- SKRYPT LOGIKI CHWYTANIA DLA QUESTA (GRAB) -->
+    <script>
+        // Rejestracja komponentu do chwytania obiektów w A-Frame
+        AFRAME.registerComponent('simple-grab', {
+            init: function () {
+                this.el.addEventListener('triggerdown', this.onGrab.bind(this)); // Quest Trigger
+                this.el.addEventListener('gripdown', this.onGrab.bind(this));    // Quest Grip (Boczny)
+                this.el.addEventListener('triggerup', this.onRelease.bind(this));
+                this.el.addEventListener('gripup', this.onRelease.bind(this));
+                
+                this.grabbedEl = null;
+                this.tempParent = this.el; // Kontroler
+            },
+            onGrab: function (evt) {
+                // Szukamy obiektów w zasięgu (klasa .grabbable)
+                // Uproszczona wersja: po prostu łapie model główny, jeśli jest blisko lub zdefiniowany
+                const model = document.querySelector('#vr-model-entity');
+                if (model) {
+                    this.grabbedEl = model;
+                    // Przyczep model do kontrolera
+                    this.grabbedEl.object3D.attach(this.el.object3D);
+                }
+            },
+            onRelease: function (evt) {
+                if (this.grabbedEl) {
+                    // Odczep model (wraca do sceny, ale zachowuje pozycję w przestrzeni)
+                    this.el.sceneEl.object3D.attach(this.grabbedEl.object3D);
+                    this.grabbedEl = null;
+                }
+            }
+        });
+
+        // Funkcja przełączania widoków
+        function enterQuestMode() {
+            document.getElementById('mobile-container').style.display = 'none';
+            document.getElementById('vr-container').style.display = 'block';
+            document.querySelector('.btn-close-vr').style.display = 'block';
+            
+            // Wymuś wejście w VR (jeśli przeglądarka pozwoli, inaczej user klika ikonę gogli)
+            const scene = document.querySelector('a-scene');
+            if (scene.enterVR) {
+                scene.enterVR();
+            }
+        }
+
+        function exitQuestMode() {
+            document.getElementById('mobile-container').style.display = 'block';
+            document.getElementById('vr-container').style.display = 'none';
+            document.querySelector('.btn-close-vr').style.display = 'none';
+            
+            const scene = document.querySelector('a-scene');
+            scene.exitVR();
+        }
+    </script>
+</head>
+<body>
+
+    <!-- 1. TRYB KLASYCZNY (Mobile / Desktop) -->
+    <div id="mobile-container">
+        <model-viewer 
+            src="PTD-00.glb" 
+            ios-src="PTD-00.usdz" 
+            ar 
+            ar-modes="scene-viewer quick-look" 
+            camera-controls 
+            auto-rotate
+            shadow-intensity="1"
+            touch-action="pan-y">
+            
+            <!-- Standardowy przycisk AR (dla iOS/Android) - Model Viewer obsługuje go sam -->
+            <button slot="ar-button" class="btn btn-ar" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);">
+                📱 Zobacz w AR (Telefon)
+            </button>
+        </model-viewer>
+
+        <!-- Dodatkowy przycisk dla użytkowników Quest -->
+        <div style="position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 100;">
+            <button onclick="enterQuestMode()" class="btn btn-vr">
+                🥽 Otwórz w Quest 3 (Tryb Chwytania)
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. TRYB VR (A-Frame dla Quest 3) -->
+    <div id="vr-container">
+        <button onclick="exitQuestMode()" class="btn btn-close-vr">❌ Wróć</button>
+
+        <a-scene embedded renderer="colorManagement: true;">
+            <a-assets>
+                <a-asset-item id="model-ptd" src="PTD-00.glb"></a-asset-item>
+            </a-assets>
+
+            <!-- MODEL - Klasa .grabbable logicznie oznacza obiekt do łapania -->
+            <a-entity 
+                id="vr-model-entity"
+                gltf-model="#model-ptd" 
+                position="0 1 -1" 
+                scale="1 1 1"
+                shadow="receive: true">
+            </a-entity>
+
+            <!-- OŚWIETLENIE -->
+            <a-entity light="type: ambient; intensity: 0.6;"></a-entity>
+            <a-entity light="type: directional; intensity: 1;" position="-1 2 1"></a-entity>
+
+            <!-- RIG (GRACZ) + KONTROLERY Z FUNKCJĄ GRAB -->
+            <a-entity id="rig" position="0 0 0">
+                <a-entity camera position="0 1.6 0" look-controls="pointerLockEnabled: false"></a-entity>
+                
+                <!-- Lewa Ręka (z logiką chwytania) -->
+                <a-entity 
+                    oculus-touch-controls="hand: left" 
+                    simple-grab 
+                    model="true">
+                </a-entity>
+                
+                <!-- Prawa Ręka (z logiką chwytania) -->
+                <a-entity 
+                    oculus-touch-controls="hand: right" 
+                    simple-grab 
+                    model="true" 
+                    laser-controls="hand: right">
+                </a-entity>
+            </a-entity>
+            
+            <!-- Tło VR -->
+            <a-sky color="#ECECEC"></a-sky>
+        </a-scene>
+    </div>
+
+</body>
 </html>
