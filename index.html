@@ -12,24 +12,23 @@
 </head>
 <body>
 
-    <model-viewer 
-        src="PTD-00.glb" 
-        ios-src="PTD-00.usdz" 
-        ar 
-        ar-modes="scene-viewer webxr quick-look" 
-        camera-controls 
-        auto-rotate
-        shadow-intensity="1">
-        interaction-prompt="auto"
-        ar-placement="floor"
-        touch-action="pan-y">
-        
-        <button slot="ar-button" style="position: absolute; bottom: 200px; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: #007bff; color: white; border-radius: 30px; border: none; font-weight: bold;">
-            📦 Zobacz w AR
-        </button>
-
-    </model-viewer>
+<model-viewer 
+    src="PTD-00.glb" 
+    ios-src="PTD-00.usdz" 
+    ar 
+    ar-modes="webxr scene-viewer quick-look" 
+    camera-controls 
+    interaction-prompt="auto"
+    ar-placement="floor"
+    shadow-intensity="1"
+    touch-action="pan-y">
+    
+    <button slot="ar-button" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: #007bff; color: white; border-radius: 30px; border: none; font-weight: bold;">
+        📦 Zobacz w Twojej przestrzeni
+    </button>
+</model-viewer>
 
 </body>
 </html>
+
 
